@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spatial — Hand Gesture 3D Drawing</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #0a0e1a; color: #d8f0ff;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    overflow: hidden;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas.three { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  canvas.debug { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+
+  #hud-top-left, #hud-top-right, #hud-bottom-right {
+    position: fixed; padding: 8px 10px;
+    border: 1px solid rgba(120, 220, 255, 0.35);
+    background: rgba(5, 15, 28, 0.6);
+    backdrop-filter: blur(6px);
+    font-size: 12px; line-height: 1.5; letter-spacing: 0.4px;
+    border-radius: 4px; pointer-events: none;
+    text-shadow: 0 0 4px #00aaff66;
+    z-index: 10;
+  }
+  #hud-top-left { top: 10px; left: 12px; min-width: 220px; }
+  #hud-top-right { top: 10px; right: 12px; min-width: 160px; text-align: right; }
+  #hud-bottom-right { bottom: 10px; right: 12px; min-width: 150px; text-align: right; }
+  .k { color: #7ae0ff; }
+  .v { color: #e8fbff; }
+  #conf-bar {
+    height: 4px; background: rgba(120, 220, 255, 0.12);
+    border-radius: 2px; margin-top: 4px; overflow: hidden;
+  }
+  #conf-bar > i {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, #7ae0ff, #2fff70);
+    transition: width 80ms linear;
+  }
+  #color-swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    border: 1px solid #fff6; vertical-align: middle; margin-left: 4px;
+  }
+
+  #hud-library {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; padding: 6px 8px;
+    border: 1px solid rgba(120, 220, 255, 0.3);
+    background: rgba(5, 15, 28, 0.65); backdrop-filter: blur(6px);
+    border-radius: 6px; z-index: 10; pointer-events: none;
+  }
+  #hud-library .slot {
+    width: 44px; height: 44px; border-radius: 4px;
+    border: 1px solid rgba(120, 220, 255, 0.25);
+    background: rgba(10, 20, 40, 0.6);
+    display: flex; align-items: center; justify-content: center;
+    color: #9fd8ff; font-size: 11px; position: relative;
+  }
+  #hud-library .slot.active {
+    border-color: #7ae0ff;
+    box-shadow: 0 0 10px #00aaff77, inset 0 0 10px #7ae0ff33;
+    color: #fff;
+  }
+  #hud-library .slot .num {
+    position: absolute; top: 2px; left: 3px; font-size: 9px; color: #7ae0ff99;
+  }
+
+  #perm {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center; z-index: 30;
+    background: radial-gradient(ellipse at center, #0a1524 0%, #000 100%);
+  }
+  #perm .box {
+    padding: 22px 26px; border: 1px solid rgba(120, 220, 255, 0.5);
+    border-radius: 8px; max-width: 480px; text-align: center;
+    background: rgba(5, 20, 35, 0.9);
+  }
+  #perm h1 { color: #7ae0ff; font-size: 18px; margin: 0 0 10px; letter-spacing: 2px; }
+  #perm button {
+    margin-top: 14px; padding: 10px 18px; cursor: pointer;
+    border: 1px solid #7ae0ff; background: #002a44;
+    color: #dff6ff; font-family: inherit; font-size: 13px;
+    border-radius: 4px; letter-spacing: 1px;
+  }
+  #perm button:hover { background: #003c60; box-shadow: 0 0 12px #00aaff66; }
+
+  #mode-badge {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    padding: 4px 12px; border-radius: 12px;
+    font-size: 11px; letter-spacing: 2px;
+    border: 1px solid rgba(120, 220, 255, 0.35);
+    background: rgba(5, 15, 28, 0.65); backdrop-filter: blur(6px);
+    z-index: 10; pointer-events: auto; cursor: pointer; user-select: none;
+    color: #7ae0ff;
+  }
+
+  #color-wheel {
+    position: fixed; display: none; pointer-events: none; z-index: 15;
+  }
+  #color-wheel canvas { display: block; }
+
+  #save-toast {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    padding: 6px 12px; border-radius: 4px;
+    background: rgba(47, 255, 112, 0.18);
+    border: 1px solid rgba(47, 255, 112, 0.5);
+    color: #b8ffcc; font-size: 12px;
+    z-index: 14; display: none; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <canvas class="three" id="three-canvas"></canvas>
+    <canvas class="debug" id="debug-canvas"></canvas>
+    <video id="video" playsinline style="display:none"></video>
+
+    <div id="mode-badge" title="Click to toggle focus mode">MODE · BALANCED</div>
+
+    <div id="hud-top-left">
+      <div><span class="k">Gesture</span> <span class="v" id="gesture-name">—</span></div>
+      <div id="conf-bar"><i id="conf-fill"></i></div>
+      <div><span class="k">Hands</span> <span class="v" id="hands-n">0</span> · <span class="k">FPS</span> <span class="v" id="fps">—</span></div>
+    </div>
+
+    <div id="hud-top-right">
+      <div><span class="k">Tool</span> <span class="v" id="tool-label">Idle</span></div>
+      <div><span class="k">Brush</span> <span class="v" id="brush-label">neon</span><span id="color-swatch"></span></div>
+    </div>
+
+    <div id="hud-library"></div>
+
+    <div id="hud-bottom-right">
+      <div><span class="k">Strokes</span> <span class="v" id="stroke-count">0</span> · <span class="k">Objects</span> <span class="v" id="object-count">0</span></div>
+      <div><span class="k">Undo</span> <span class="v" id="undo-count">0</span> · <span class="k">Redo</span> <span class="v" id="redo-count">0</span></div>
+    </div>
+
+    <div id="color-wheel"><canvas width="220" height="220"></canvas></div>
+    <div id="save-toast">saved</div>
+
+    <div id="perm">
+      <div class="box">
+        <h1>CAMERA ACCESS</h1>
+        <div id="perm-msg">Spatial needs your webcam to track hand gestures.</div>
+        <button id="perm-retry">Grant Camera Access</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MediaPipe loaded as classic scripts (they set window.Hands / window.Camera).
+       npm import of @mediapipe/hands doesn't work cleanly under Vite because
+       the package is a global-writing script, not a proper ESM. -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
